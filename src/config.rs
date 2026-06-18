@@ -2,10 +2,13 @@ use anyhow::{bail, Context, Result};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 
 const CONFIG_DIR_ENV: &str = "GIT_AUTO_COMMIT_CONFIG_DIR";
 const FORMAT_ENV: &str = "COMMIT_FORMAT";
+const TIMEOUT_ENV: &str = "GIT_AUTO_COMMIT_TIMEOUT_SECS";
 const DEFAULT_FORMAT: &str = "type(scope): description";
+const DEFAULT_TIMEOUT_SECS: u64 = 300;
 
 pub fn config_dir() -> Result<PathBuf> {
     if let Ok(path) = env::var(CONFIG_DIR_ENV) {
@@ -59,6 +62,14 @@ fn format_from_env_or_default() -> String {
         .unwrap_or_else(|_| DEFAULT_FORMAT.to_string())
         .trim()
         .to_string()
+}
+
+pub fn request_timeout() -> Duration {
+    env::var(TIMEOUT_ENV)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(DEFAULT_TIMEOUT_SECS))
 }
 
 pub fn load_ignore_patterns() -> Vec<String> {

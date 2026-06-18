@@ -32,6 +32,10 @@ struct OllamaRequest {
 struct OllamaResponse {
     #[serde(default)]
     response: String,
+    #[serde(default)]
+    thinking: String,
+    #[serde(default)]
+    done_reason: Option<String>,
 }
 
 pub fn ollama_host() -> String {
@@ -47,21 +51,57 @@ pub fn discover_model(client: &reqwest::blocking::Client, host: &str) -> Result<
         .json::<OllamaStatusResponse>()
         .context("failed to parse Ollama model list")?;
 
-    if tags_res.models.is_empty() {
-        bail!("no models downloaded. Run 'ollama pull llama3'");
+    let chat_models: Vec<_> = tags_res
+        .models
+        .iter()
+        .filter(|m| is_chat_model(&m.name))
+        .collect();
+
+    if chat_models.is_empty() {
+        bail!("no chat models downloaded. Run 'ollama pull llama3.2:3b'");
     }
 
-    let preferred = ["llama3", "qwen", "gemma"];
+    let preferred = ["llama3", "qwen3", "qwen", "gemma3", "gemma"];
     for p in preferred {
-        if let Some(m) = tags_res.models.iter().find(|m| m.name.contains(p)) {
+        if let Some(m) = chat_models
+            .iter()
+            .find(|m| m.name.contains(p) && !is_small_model(&m.name))
+        {
             return Ok(m.name.clone());
         }
     }
 
-    Ok(tags_res.models[0].name.clone())
+    chat_models
+        .iter()
+        .min_by_key(|m| model_preference_rank(&m.name))
+        .map(|m| m.name.clone())
+        .ok_or_else(|| anyhow::anyhow!("no usable chat model found"))
 }
 
 pub fn generate_commit_message(
+    client: &reqwest::blocking::Client,
+    host: &str,
+    model: &str,
+    format_spec: &str,
+    prompt: &str,
+    fallback_prompt: Option<&str>,
+) -> Result<String> {
+    match generate_once(client, host, model, format_spec, prompt) {
+        Ok(message) => Ok(message),
+        Err(first_error) => {
+            let Some(fallback) = fallback_prompt.filter(|p| !p.trim().is_empty() && *p != prompt)
+            else {
+                return Err(first_error);
+            };
+
+            eprintln!("Warning: model returned no usable message, retrying without diffs");
+            generate_once(client, host, model, format_spec, fallback)
+                .with_context(|| format!("retry failed after: {first_error:#}"))
+        }
+    }
+}
+
+fn generate_once(
     client: &reqwest::blocking::Client,
     host: &str,
     model: &str,
@@ -87,7 +127,7 @@ pub fn generate_commit_message(
         stream: false,
         keep_alive: "30m".to_string(),
         think: false,
-        options: OllamaOptions { num_predict: 80 },
+        options: OllamaOptions { num_predict: 120 },
     };
 
     let url = format!("{host}/api/generate");
@@ -95,7 +135,13 @@ pub fn generate_commit_message(
         .post(url)
         .json(&request_body)
         .send()
-        .map_err(map_connect_error)?;
+        .map_err(map_request_error)?;
+
+    if response.status().as_u16() == 404 {
+        bail!(
+            "model '{model}' not found. Run 'ollama list' and 'git-auto-commit set-model <name>'"
+        );
+    }
 
     if !response.status().is_success() {
         bail!("ollama API error: {}", response.status());
@@ -105,7 +151,52 @@ pub fn generate_commit_message(
         .json::<OllamaResponse>()
         .context("failed to parse Ollama response")?;
 
-    clean_commit_message(&res.response).context("model returned an empty or unparseable response")
+    message_from_response(&res).with_context(|| {
+        format!(
+            "model returned an empty or unparseable response (done_reason={:?}, raw={:?})",
+            res.done_reason,
+            preview(&res.response)
+        )
+    })
+}
+
+fn message_from_response(res: &OllamaResponse) -> Option<String> {
+    clean_commit_message(&res.response).or_else(|| clean_commit_message(&res.thinking))
+}
+
+fn preview(text: &str) -> String {
+    let trimmed: String = text.chars().take(120).collect();
+    if text.chars().count() > 120 {
+        format!("{trimmed}…")
+    } else {
+        trimmed
+    }
+}
+
+fn is_chat_model(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    !(lower.contains("embed") || lower.contains("cloud"))
+}
+
+fn is_small_model(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.ends_with(":1b") || lower.ends_with(":300m")
+}
+
+fn model_preference_rank(name: &str) -> u8 {
+    if is_small_model(name) {
+        return 200;
+    }
+    if name.contains("llama3") {
+        return 0;
+    }
+    if name.contains("qwen3") || name.contains("qwen") {
+        return 1;
+    }
+    if name.contains("gemma3") || name.contains("gemma") {
+        return 2;
+    }
+    50
 }
 
 pub fn clean_commit_message(raw: &str) -> Option<String> {
@@ -132,6 +223,18 @@ fn map_connect_error(err: reqwest::Error) -> anyhow::Error {
     }
 }
 
+fn map_request_error(err: reqwest::Error) -> anyhow::Error {
+    if err.is_connect() {
+        return map_connect_error(err);
+    }
+    if err.is_timeout() {
+        return anyhow::anyhow!(
+            "ollama request timed out. Try again, use a smaller model, or raise GIT_AUTO_COMMIT_TIMEOUT_SECS"
+        );
+    }
+    err.into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,5 +255,25 @@ mod tests {
     fn clean_commit_message_rejects_empty_output() {
         assert_eq!(clean_commit_message("   \n\t"), None);
         assert_eq!(clean_commit_message("``"), None);
+    }
+
+    #[test]
+    fn message_from_response_uses_thinking_fallback() {
+        let res = OllamaResponse {
+            response: String::new(),
+            thinking: "feat: add retry logic".to_string(),
+            done_reason: Some("stop".to_string()),
+        };
+        assert_eq!(
+            message_from_response(&res),
+            Some("feat: add retry logic".to_string())
+        );
+    }
+
+    #[test]
+    fn is_chat_model_rejects_embeddings_and_cloud() {
+        assert!(!is_chat_model("embeddinggemma:300m"));
+        assert!(!is_chat_model("glm-5.1:cloud"));
+        assert!(is_chat_model("llama3.2:3b"));
     }
 }

@@ -12,8 +12,8 @@ fn build_commit_context_lists_staged_files() {
     repo.write_and_stage("hello.txt", "hello world\n");
 
     let context = repo.in_repo(|| build_commit_context().expect("build context"));
-    assert!(context.contains("hello.txt"));
-    assert!(context.contains("Staged changes: 1 files"));
+    assert!(context.text.contains("hello.txt"));
+    assert!(context.text.contains("Staged changes: 1 files"));
 }
 
 #[test]
@@ -21,7 +21,7 @@ fn build_commit_context_is_empty_without_staged_changes() {
     let repo = GitRepo::new();
 
     let context = repo.in_repo(|| build_commit_context().expect("build context"));
-    assert!(context.trim().is_empty());
+    assert!(context.text.trim().is_empty());
 }
 
 #[test]

@@ -145,12 +145,39 @@ fn write_file_summary(prompt: &mut String, file: &StagedFile, ignored: bool) {
     );
 }
 
-pub fn build_commit_context() -> Result<String> {
+pub fn build_commit_context() -> Result<CommitContext> {
+    build_commit_context_with_options(CommitContextOptions {
+        include_diffs: true,
+    })
+}
+
+pub fn build_commit_context_summary() -> Result<String> {
+    build_commit_context_with_options(CommitContextOptions {
+        include_diffs: false,
+    })
+    .map(|ctx| ctx.text)
+}
+
+#[derive(Debug, Clone)]
+pub struct CommitContext {
+    pub text: String,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CommitContextOptions {
+    pub include_diffs: bool,
+}
+
+pub fn build_commit_context_with_options(options: CommitContextOptions) -> Result<CommitContext> {
     let name_status =
         run_git(&["diff", "--staged", "--name-status"]).context("failed to list staged files")?;
     let mut files = parse_name_status(&name_status);
     if files.is_empty() {
-        return Ok(String::new());
+        return Ok(CommitContext {
+            text: String::new(),
+            truncated: false,
+        });
     }
 
     let numstat =
@@ -215,7 +242,7 @@ pub fn build_commit_context() -> Result<String> {
     });
     diff_candidates.truncate(MAX_FULL_DIFF_FILES);
 
-    if !diff_candidates.is_empty() {
+    if options.include_diffs && !diff_candidates.is_empty() {
         prompt.push_str("\nDetailed diffs (selected files only):\n");
         let mut diff_args: Vec<&str> = vec!["diff", "--staged", "--"];
         for file in &diff_candidates {
@@ -231,7 +258,9 @@ pub fn build_commit_context() -> Result<String> {
         }
     }
 
+    let mut truncated = false;
     if prompt.len() > MAX_PROMPT_CHARS {
+        truncated = true;
         eprintln!(
             "Warning: prompt truncated to {} chars (was {})",
             MAX_PROMPT_CHARS,
@@ -240,10 +269,15 @@ pub fn build_commit_context() -> Result<String> {
         truncate_to_byte_limit(&mut prompt, MAX_PROMPT_CHARS);
     }
 
-    Ok(prompt)
+    Ok(CommitContext {
+        text: prompt,
+        truncated,
+    })
 }
 
 /// Truncates `text` to at most `max_bytes` without splitting a UTF-8 codepoint.
+/// Prefers cutting at the last newline in the second half of the range so diffs
+/// are not left mid-line.
 fn truncate_to_byte_limit(text: &mut String, max_bytes: usize) {
     if text.len() <= max_bytes {
         return;
@@ -251,6 +285,11 @@ fn truncate_to_byte_limit(text: &mut String, max_bytes: usize) {
     let mut end = max_bytes;
     while end > 0 && !text.is_char_boundary(end) {
         end -= 1;
+    }
+    if let Some(newline) = text[..end].rfind('\n') {
+        if newline >= max_bytes / 2 {
+            end = newline;
+        }
     }
     text.truncate(end);
 }

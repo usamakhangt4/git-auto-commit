@@ -1,9 +1,9 @@
 use clap::{Parser, Subcommand};
 
-use crate::config::{config_dir, get_format_spec, load_model_name};
+use crate::config::{config_dir, get_format_spec, load_model_name, request_timeout};
 use crate::git::is_inside_work_tree;
 use crate::ollama::{discover_model, generate_commit_message, ollama_host};
-use crate::prompt::build_commit_context;
+use crate::prompt::{build_commit_context, build_commit_context_summary};
 use anyhow::{bail, Context, Result};
 use std::fs;
 use std::io::{self, Write};
@@ -69,17 +69,19 @@ fn set_model(model: &str) -> Result<()> {
 
 fn run_commit_flow() -> Result<()> {
     let host = ollama_host();
-    let prompt = build_commit_context()?;
+    let context = build_commit_context()?;
+    let summary_prompt = build_commit_context_summary()?;
 
-    if prompt.trim().is_empty() {
+    if context.text.trim().is_empty() {
         println!("No staged changes found. Use 'git add' to stage files first.");
         return Ok(());
     }
 
     let format_spec = get_format_spec();
+    let timeout = request_timeout();
 
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(timeout)
         .connect_timeout(std::time::Duration::from_secs(10))
         .build()
         .context("failed to build HTTP client")?;
@@ -91,8 +93,29 @@ fn run_commit_flow() -> Result<()> {
 
     println!("Using model: {target_model} | Format: {format_spec}");
 
-    let commit_message =
-        generate_commit_message(&client, &host, &target_model, &format_spec, &prompt)?;
+    let commit_message = if context.truncated {
+        eprintln!(
+            "Using summarized context (full prompt exceeded {} chars)",
+            crate::MAX_PROMPT_CHARS
+        );
+        generate_commit_message(
+            &client,
+            &host,
+            &target_model,
+            &format_spec,
+            &summary_prompt,
+            None,
+        )?
+    } else {
+        generate_commit_message(
+            &client,
+            &host,
+            &target_model,
+            &format_spec,
+            &context.text,
+            Some(&summary_prompt),
+        )?
+    };
 
     println!("\nGenerated Message:\n>>> {commit_message}");
     print!("\nCommit? [y/N]: ");
