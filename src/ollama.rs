@@ -115,7 +115,10 @@ fn generate_once(
         For bulk/initial commits with many added files, summarize the project intent, not every file. \
         Ignore lockfiles, build artifacts, and binaries unless they are the main change. \
         Your ONLY task is to write a single-line commit message. \
-        Format: '{format_spec}'. \
+        Required format: '{format_spec}'. \
+        Treat words such as 'type', 'scope', and 'description' in that format as placeholders, never literal output. \
+        For Conventional Commits, replace 'type' with the best matching kind (for example feat, fix, docs, refactor, test, build, ci, chore, perf, style, or revert), replace 'scope' with a short affected area, and replace 'description' with a concise summary. \
+        Example: 'feat(cli): generate commit messages from staged changes'. \
         Return NOTHING else — no explanations, no conversation, no summaries, \
         no surrounding quotes or backticks. Just the raw commit message on one line."
     );
@@ -208,11 +211,20 @@ pub fn clean_commit_message(raw: &str) -> Option<String> {
         .trim_matches('\'')
         .trim();
 
-    if cleaned.is_empty() {
+    if cleaned.is_empty() || contains_unexpanded_placeholder(cleaned) {
         None
     } else {
         Some(cleaned.to_string())
     }
+}
+
+fn contains_unexpanded_placeholder(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.starts_with("type(scope):")
+        || lower.starts_with("type:")
+        || lower.contains("<type>")
+        || lower.contains("<scope>")
+        || lower.contains("<description>")
 }
 
 fn map_connect_error(err: reqwest::Error) -> anyhow::Error {
@@ -255,6 +267,19 @@ mod tests {
     fn clean_commit_message_rejects_empty_output() {
         assert_eq!(clean_commit_message("   \n\t"), None);
         assert_eq!(clean_commit_message("``"), None);
+    }
+
+    #[test]
+    fn clean_commit_message_rejects_unexpanded_format_placeholders() {
+        assert_eq!(
+            clean_commit_message("type(scope): implement Ollama generation"),
+            None
+        );
+        assert_eq!(clean_commit_message("type: add parser"), None);
+        assert_eq!(
+            clean_commit_message("feat(cli): implement Ollama generation"),
+            Some("feat(cli): implement Ollama generation".to_string())
+        );
     }
 
     #[test]
