@@ -12,44 +12,56 @@ Generate Git commit messages from staged changes using a local Ollama model.
 - Summarizes very large diffs when the prompt would exceed 8,000 characters
 - Detects bootstrap commits (many new files) and adjusts the prompt
 
-## Prerequisites
+## Quick start
 
-- [Git](https://git-scm.com/)
-- [Ollama](https://ollama.com/) running locally (default: `http://localhost:11434`)
-- At least one chat model pulled, for example:
+You need [Git](https://git-scm.com/) and [Ollama](https://ollama.com/). You do
+**not** need Rust or Cargo.
 
-```bash
-ollama pull llama3.2:3b
-```
+### 1. Install git-auto-commit
 
-To build from source:
-
-- Rust **1.75+** ([rustup](https://rustup.rs/))
-
-## Installation
-
-### Quick install (no Rust required)
-
-macOS and Linux:
+On macOS or Linux, open a terminal and run:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/usamakhangt4/git-auto-commit/main/install.sh | sh
 ```
 
-Windows PowerShell:
+On Windows, open PowerShell and run:
 
 ```powershell
 irm https://raw.githubusercontent.com/usamakhangt4/git-auto-commit/main/install.ps1 | iex
 ```
 
-The installers download the latest precompiled binary from
-[GitHub Releases](https://github.com/usamakhangt4/git-auto-commit/releases). Rust and
-Cargo are not required. Ollama and Git are still required.
+### 2. Set up Ollama
+
+Start Ollama and download a model:
+
+```bash
+ollama pull llama3.2:3b
+```
+
+### 3. Use it in any Git project
+
+```bash
+git add .
+git-auto-commit
+```
+
+The tool generates a commit message and asks for confirmation before committing.
+
+## Other installation options
+
+### Download manually
+
+Download the archive for your operating system from
+[GitHub Releases](https://github.com/usamakhangt4/git-auto-commit/releases), extract
+it, and place the binary in a directory on your `PATH`.
 
 To choose another installation directory, set `GIT_AUTO_COMMIT_INSTALL_DIR`
-before running the installer.
+before running one of the quick-install commands above.
 
 ### Build from source
+
+This option requires Rust 1.75 or newer.
 
 ```bash
 git clone https://github.com/usamakhangt4/git-auto-commit.git
