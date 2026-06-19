@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: git-auto-commit
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            binary: git-auto-commit
+            use_cross: true
+          - os: macos-13
+            target: x86_64-apple-darwin
+            binary: git-auto-commit
+          - os: macos-14
+            target: aarch64-apple-darwin
+            binary: git-auto-commit
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: git-auto-commit.exe
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Install cross
+        if: matrix.use_cross
+        uses: taiki-e/install-action@cross
+      - name: Build
+        shell: bash
+        run: |
+          if [[ "${{ matrix.use_cross }}" == "true" ]]; then
+            cross build --release --locked --target "${{ matrix.target }}"
+          else
+            cargo build --release --locked --target "${{ matrix.target }}"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/${{ matrix.binary }}
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Package binaries
+        run: |
+          mkdir dist
+          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin; do
+            chmod +x "artifacts/$target/git-auto-commit"
+            tar -C "artifacts/$target" -czf "dist/git-auto-commit-$target.tar.gz" git-auto-commit
+          done
+          (cd artifacts/x86_64-pc-windows-msvc && zip "../../dist/git-auto-commit-x86_64-pc-windows-msvc.zip" git-auto-commit.exe)
+          (cd dist && sha256sum * > SHA256SUMS)
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*
+

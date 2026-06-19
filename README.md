@@ -28,6 +28,27 @@ To build from source:
 
 ## Installation
 
+### Quick install (no Rust required)
+
+macOS and Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/usamakhangt4/git-auto-commit/main/install.sh | sh
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/usamakhangt4/git-auto-commit/main/install.ps1 | iex
+```
+
+The installers download the latest precompiled binary from
+[GitHub Releases](https://github.com/usamakhangt4/git-auto-commit/releases). Rust and
+Cargo are not required. Ollama and Git are still required.
+
+To choose another installation directory, set `GIT_AUTO_COMMIT_INSTALL_DIR`
+before running the installer.
+
 ### Build from source
 
 ```bash
@@ -50,8 +71,6 @@ If you already have Rust installed:
 
 ```bash
 cargo install --path .
-# or, after publishing to crates.io:
-# cargo install git-auto-commit
 ```
 
 ## Usage
