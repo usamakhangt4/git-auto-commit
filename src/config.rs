@@ -141,7 +141,10 @@ pub fn load_model_name() -> Result<Option<String>> {
 mod tests {
     use super::*;
     use std::path::Path;
+    use std::sync::Mutex;
     use tempfile::TempDir;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     struct EnvOverride {
         key: &'static str,
@@ -182,6 +185,7 @@ mod tests {
 
     #[test]
     fn format_falls_back_to_commit_format_env() {
+        let _lock = ENV_LOCK.lock().expect("environment lock");
         let config_dir = TempDir::new().expect("tempdir");
         let _dir = with_config_dir(config_dir.path());
         let _format = EnvOverride::set(FORMAT_ENV, "custom: env");
@@ -191,6 +195,7 @@ mod tests {
 
     #[test]
     fn format_file_takes_precedence_over_env() {
+        let _lock = ENV_LOCK.lock().expect("environment lock");
         let config_dir = TempDir::new().expect("tempdir");
         let _dir = with_config_dir(config_dir.path());
         let _format = EnvOverride::set(FORMAT_ENV, "from env");
@@ -201,6 +206,7 @@ mod tests {
 
     #[test]
     fn format_uses_default_when_no_file_or_env() {
+        let _lock = ENV_LOCK.lock().expect("environment lock");
         let config_dir = TempDir::new().expect("tempdir");
         let _dir = with_config_dir(config_dir.path());
         let _format = EnvOverride::unset(FORMAT_ENV);
